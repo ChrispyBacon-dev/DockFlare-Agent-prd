@@ -4,6 +4,8 @@
   </a>
 </p>
 
+> **Note:** This repository contains the **DockFlare Agent**, which is designed to work as a worker node in a multi-server setup. It is not a standalone project and requires the main [DockFlare application](https://github.com/ChrispyBacon-dev/DockFlare) to function.
+
 <h1 align="center">DockFlare Agent</h1>
 
 <p align="center">

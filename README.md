@@ -208,15 +208,6 @@ Recommended practices:
 
 ---
 
-## Continuous Delivery
-
-- GitHub Actions (`.github/workflows/docker-publish.yml`) builds and publishes multi-architecture images (`linux/amd64`, `linux/arm64`).
-- Pushing to the default branch updates the `latest` tag; annotated tags (e.g. `v1.0.0`) publish matching semantic version tags.
-- PRs build in CI without pushing, loading an `amd64` image for smoke validation.
-- Secrets required: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` with `workflow` scope PAT.
-
----
-
 ## Troubleshooting
 
 | Symptom | Resolution |

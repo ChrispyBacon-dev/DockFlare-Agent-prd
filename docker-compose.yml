@@ -7,6 +7,8 @@ services:
     image: dockflare-agent:local
     container_name: dockflare-agent
     restart: unless-stopped
+    environment:
+    - TZ=Europe/Zurich  # Set your timezone here
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - agent_data:/app/data

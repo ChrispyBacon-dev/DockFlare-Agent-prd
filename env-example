@@ -1,0 +1,3 @@
+DOCKFLARE_MASTER_URL=https://dockflare.example.com
+DOCKFLARE_API_KEY=agent_api_key_goes_here
+HOSTNAME_LABEL_PREFIX=prod-

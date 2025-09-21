@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  dockflare-agent:
+    build:
+      context: .
+    image: dockflare-agent:local
+    container_name: dockflare-agent
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - agent_data:/app/data
+    env_file:
+      - .env
+    networks:
+      - cloudflare-net
+
+networks:
+  cloudflare-net:
+   name: cloudflare-net
+   external: true
+
+volumes:
+  agent_data:

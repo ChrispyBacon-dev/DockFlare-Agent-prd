@@ -4,6 +4,7 @@ import json
 import docker
 import requests
 import logging
+import tempfile
 from threading import Thread
 from dotenv import load_dotenv
 import cloudflare_api
@@ -20,6 +21,7 @@ load_dotenv()
 MASTER_URL = os.getenv("DOCKFLARE_MASTER_URL")
 API_KEY = os.getenv("DOCKFLARE_API_KEY")
 CLOUDFLARED_NETWORK_NAME = os.getenv("CLOUDFLARED_NETWORK_NAME", "cloudflare-net")
+CLOUDFLARED_IMAGE = os.getenv("CLOUDFLARED_IMAGE", "cloudflare/cloudflared:2024.8.0")
 AGENT_ID_FILE = "/app/data/agent_id.txt"
 TUNNEL_STATE_FILE = "/app/data/tunnel_state.json"
 AGENT_ID = None  # Will be assigned by the master
@@ -71,11 +73,36 @@ def save_tunnel_state():
         "desired_state": desired_tunnel_state
     }
     try:
-        os.makedirs(os.path.dirname(TUNNEL_STATE_FILE), exist_ok=True)
-        with open(TUNNEL_STATE_FILE, 'w') as f:
-            json.dump(data, f)
+        _write_secure_file(TUNNEL_STATE_FILE, lambda fh: json.dump(data, fh))
     except Exception as e:
         logging.error(f"Failed to persist tunnel state: {e}")
+
+
+def _write_secure_file(path, writer):
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile('w', dir=directory, delete=False) as tmp_file:
+            writer(tmp_file)
+            tmp_file.flush()
+            try:
+                os.fsync(tmp_file.fileno())
+            except (AttributeError, OSError):
+                pass
+            temp_path = tmp_file.name
+        try:
+            os.chmod(temp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(temp_path, path)
+    except Exception:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        raise
 
 
 def ensure_cloudflared_running(client):
@@ -123,12 +150,13 @@ def _run_cloudflared_container(client, tunnel_name, tunnel_token):
         return False
     try:
         tunnel_container = client.containers.run(
-            "cloudflare/cloudflared:latest",
-            command=f"tunnel --no-autoupdate run --token {tunnel_token}",
+            CLOUDFLARED_IMAGE,
+            command=["tunnel", "--no-autoupdate", "run"],
             detach=True,
             name="dockflare-agent-tunnel",
             network=CLOUDFLARED_NETWORK_NAME,
-            restart_policy={"Name": "unless-stopped"}
+            restart_policy={"Name": "unless-stopped"},
+            environment={"TUNNEL_TOKEN": tunnel_token}
         )
         current_tunnel_version = fetch_cloudflared_version(tunnel_container)
         logging.info(f"cloudflared container started: {tunnel_container.short_id}")
@@ -158,9 +186,7 @@ def load_agent_id():
 def save_agent_id(agent_id):
     """Saves agent ID to the filesystem."""
     try:
-        os.makedirs(os.path.dirname(AGENT_ID_FILE), exist_ok=True)
-        with open(AGENT_ID_FILE, 'w') as f:
-            f.write(agent_id)
+        _write_secure_file(AGENT_ID_FILE, lambda fh: fh.write(agent_id))
         logging.info(f"Saved Agent ID to {AGENT_ID_FILE}")
     except IOError as e:
         logging.error(f"Could not save agent ID file: {e}")

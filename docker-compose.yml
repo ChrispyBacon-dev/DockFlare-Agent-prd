@@ -1,20 +1,35 @@
 version: '3.8'
+
 services:
-  dockflare-agent:
-    #build:
-    #  context: .
-    #image: dockflare-agent:local
-    image: alplat/dockflare-agent:stable
-    container_name: dockflare-agent
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.2.3
+    container_name: docker-socket-proxy
     restart: unless-stopped
     environment:
-      - TZ=Europe/Zurich      # Set your timezone here
-      - LOG_LEVEL=info        # Optional logging override
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - CONTAINERS=1
+      - EVENTS=1
+      - NETWORKS=1
+      - POST=1
+      - PING=1
+      - INFO=1
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - agent_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  dockflare-agent:
+    image: alplat/dockflare-agent:latest
+    container_name: dockflare-agent
+    restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+      - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - agent_data:/app/data
+    depends_on:
+      - docker-socket-proxy
     networks:
       - cloudflare-net
 
@@ -23,5 +38,5 @@ volumes:
 
 networks:
   cloudflare-net:
-   name: cloudflare-net
-   external: true
+    name: cloudflare-net
+    external: true

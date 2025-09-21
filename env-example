@@ -1,3 +1,6 @@
 DOCKFLARE_MASTER_URL=https://dockflare.example.com
 DOCKFLARE_API_KEY=agent_api_key_goes_here
-HOSTNAME_LABEL_PREFIX=prod-
+DOCKER_HOST=tcp://docker-socket-proxy:2375
+CLOUDFLARED_IMAGE=cloudflare/cloudflared@sha256:REPLACE_WITH_PINNED_DIGEST
+LOG_LEVEL=info
+TZ=Europe/Zurich

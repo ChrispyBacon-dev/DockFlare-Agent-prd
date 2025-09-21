@@ -107,9 +107,12 @@ Populate the following environment variables (see `env-example` for a template):
 |----------|----------|-------------|
 | `DOCKFLARE_MASTER_URL` | ✅ | Base URL of the DockFlare Master (`https://dockflare.example.com`). |
 | `DOCKFLARE_API_KEY` | ✅ | Agent API key generated in the master UI (`Agents → Generate Key`). |
+| `CLOUDFLARED_IMAGE` | ✅ | Pinned Cloudflared image (e.g. `cloudflare/cloudflared@sha256:...`). |
+| `DOCKER_HOST` | ✅ | Address of the Docker socket proxy (`tcp://docker-socket-proxy:2375`). |
+| `CLOUDFLARED_NETWORK_NAME` | ❌ | Docker network used for the managed tunnel (`cloudflare-net` by default). |
 | `LOG_LEVEL` | ❌ | Python logging level (`INFO` by default). |
 | `REPORT_INTERVAL_SECONDS` | ❌ | Cadence for status reports (defaults to `30`). |
-| `CLOUDFLARED_NETWORK_NAME` | ❌ | Docker network used for the managed tunnel (`cloudflare-net` by default). |
+| `TZ` | ❌ | Host timezone exposed to the container (`UTC` by default). |
 
 The agent persists lightweight state inside `/app/data`:
 
@@ -126,19 +129,37 @@ Bind-mount a volume to `/app/data` in production so identity survives container 
 
 ```yaml
 version: '3.8'
+
 services:
-  dockflare-agent:
-    image: alplat/dockflare-agent:stable
-    container_name: dockflare-agent
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.2.3
+    container_name: docker-socket-proxy
     restart: unless-stopped
     environment:
-      - TZ=Europe/Zurich      # Set your timezone here
-      - LOG_LEVEL=info        # Optional logging override
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - CONTAINERS=1
+      - EVENTS=1
+      - NETWORKS=1
+      - POST=1
+      - INFO=1
+      - PING=1
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - agent_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  dockflare-agent:
+    image: alplat/dockflare-agent:latest
+    container_name: dockflare-agent
+    restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - agent_data:/app/data
+    depends_on:
+      - docker-socket-proxy
     networks:
       - cloudflare-net
 
@@ -147,13 +168,14 @@ volumes:
 
 networks:
   cloudflare-net:
-   name: cloudflare-net
-   external: true
+    name: cloudflare-net
+    external: true
 ```
 
-- Mount the Docker socket **read-only** so the agent can monitor containers.
-- Provide a persistent volume for `/app/data`.
-- Ensure the network declared in `CLOUDFLARED_NETWORK_NAME` exists (create it once with `docker network create cloudflare-net`).
+- The proxy limits the Docker API surface the agent can reach; only the variables set to `1` are exposed.
+- The agent image already runs as the unprivileged `dockflare` user (UID/GID 65532). Override with `DOCKFLARE_UID/DOCKFLARE_GID` build args if your environment requires a different mapping.
+- Provide a persistent volume for `/app/data` so cached agent identity survives restarts.
+- Ensure the external network declared in `CLOUDFLARED_NETWORK_NAME` exists (`docker network create cloudflare-net`).
 
 ### Local Development
 
@@ -175,6 +197,8 @@ The provided `docker-compose.yml` mirrors the production setup for quick validat
 - **Per-agent API keys** are revocable—delete the key in the master UI to immediately cut off a compromised host.
 - **Transport security** – front the master with HTTPS (or Cloudflare Access) so agent traffic is encrypted end-to-end.
 - **Redis** should reside on a trusted network segment and require authentication when deployed outside a lab environment.
+- **Docker access** is mediated through the bundled socket proxy so the agent can only list containers, stream events, manage networks, and operate its tunnel container.
+- **Least privilege container** – the agent image runs as the `dockflare` user (UID/GID 65532); no root processes remain once start-up is complete.
 
 Recommended practices:
 

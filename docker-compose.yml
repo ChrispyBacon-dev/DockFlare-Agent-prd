@@ -1,26 +1,27 @@
 version: '3.8'
-
 services:
   dockflare-agent:
-    build:
-      context: .
-    image: dockflare-agent:local
+  # build:
+  # context: .
+  # image: dockflare-agent:local
+    image: alplat/dockflare-agent:stable
     container_name: dockflare-agent
     restart: unless-stopped
     environment:
-    - TZ=Europe/Zurich  # Set your timezone here
+      - TZ=Europe/Zurich      # Set your timezone here
+      - LOG_LEVEL=info        # Optional logging override
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - agent_data:/app/data
     env_file:
       - .env
     networks:
       - cloudflare-net
 
+volumes:
+  agent_data:
+
 networks:
   cloudflare-net:
    name: cloudflare-net
    external: true
-
-volumes:
-  agent_data:

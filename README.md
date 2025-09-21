@@ -130,13 +130,14 @@ services:
     image: alplat/dockflare-agent:stable
     container_name: dockflare-agent
     restart: unless-stopped
-    env_file:
-      - .env
     environment:
+      - TZ=Europe/Zurich      # Set your timezone here
       - LOG_LEVEL=info        # Optional logging override
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - agent_data:/app/data
+    env_file:
+      - .env
     networks:
       - cloudflare-net
 
@@ -145,7 +146,8 @@ volumes:
 
 networks:
   cloudflare-net:
-    external: true
+   name: cloudflare-net
+   external: true
 ```
 
 - Mount the Docker socket **read-only** so the agent can monitor containers.

@@ -142,6 +142,7 @@ services:
       - CONTAINERS=1
       - EVENTS=1
       - NETWORKS=1
+      - IMAGES=1
       - POST=1
       - INFO=1
       - PING=1
@@ -175,6 +176,7 @@ networks:
 ```
 
 - The proxy limits the Docker API surface the agent can reach; only the variables set to `1` are exposed. Attach both services to the same external network so the agent can resolve `docker-socket-proxy`.
+- Granting `IMAGES=1` allows the agent to pull the managed `cloudflared` image while keeping other Docker APIs disabled.
 - The agent image already runs as the unprivileged `dockflare` user (UID/GID 65532). Override with `DOCKFLARE_UID/DOCKFLARE_GID` build args if your environment requires a different mapping.
 - Provide a persistent volume for `/app/data` so cached agent identity survives restarts.
 - Ensure the external network declared in `CLOUDFLARED_NETWORK_NAME` exists (`docker network create cloudflare-net`).

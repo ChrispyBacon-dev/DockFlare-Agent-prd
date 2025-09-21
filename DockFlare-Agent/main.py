@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import docker
@@ -8,6 +9,41 @@ import tempfile
 from threading import Thread
 from dotenv import load_dotenv
 import cloudflare_api
+
+DEFAULT_CLOUDFLARED_IMAGE = "cloudflare/cloudflared:2025.9.0"
+_SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
+
+
+def _normalize_cloudflared_image(raw_value, default_image):
+    """Sanitize the configured cloudflared image reference."""
+    if not raw_value:
+        return default_image
+
+    candidate = raw_value.strip()
+    if not candidate:
+        logging.warning("CLOUDFLARED_IMAGE is blank after trimming; falling back to default %s", default_image)
+        return default_image
+
+    # Split on whitespace to drop inline comments or accidental extra tokens.
+    candidate = candidate.split()[0]
+
+    if "#" in candidate:
+        candidate = candidate.split("#", 1)[0].strip()
+        if not candidate:
+            logging.warning("CLOUDFLARED_IMAGE only contained a comment; falling back to default %s", default_image)
+            return default_image
+
+    if "@sha256:" in candidate:
+        repository, digest = candidate.split("@sha256:", 1)
+        if not repository:
+            logging.error("CLOUDFLARED_IMAGE is missing the repository before @sha256; falling back to default %s", default_image)
+            return default_image
+        if not _SHA256_HEX_RE.fullmatch(digest):
+            logging.error("CLOUDFLARED_IMAGE digest is not a valid 64 char hex string; falling back to default %s", default_image)
+            return default_image
+        return f"{repository}@sha256:{digest.lower()}"
+
+    return candidate
 
 # Basic Logging Configuration (configurable via LOG_LEVEL env var; default INFO)
 _LOG_LEVEL_STR = os.getenv('LOG_LEVEL', 'INFO').upper()
@@ -21,7 +57,11 @@ load_dotenv()
 MASTER_URL = os.getenv("DOCKFLARE_MASTER_URL")
 API_KEY = os.getenv("DOCKFLARE_API_KEY")
 CLOUDFLARED_NETWORK_NAME = os.getenv("CLOUDFLARED_NETWORK_NAME", "cloudflare-net")
-CLOUDFLARED_IMAGE = os.getenv("CLOUDFLARED_IMAGE", "cloudflare/cloudflared:2024.8.0")
+CLOUDFLARED_IMAGE = _normalize_cloudflared_image(os.getenv("CLOUDFLARED_IMAGE"), DEFAULT_CLOUDFLARED_IMAGE)
+if CLOUDFLARED_IMAGE != DEFAULT_CLOUDFLARED_IMAGE:
+    logging.info(f"Using configured cloudflared image: {CLOUDFLARED_IMAGE}")
+else:
+    logging.info(f"Using default cloudflared image: {DEFAULT_CLOUDFLARED_IMAGE}")
 AGENT_ID_FILE = "/app/data/agent_id.txt"
 TUNNEL_STATE_FILE = "/app/data/tunnel_state.json"
 AGENT_ID = None  # Will be assigned by the master

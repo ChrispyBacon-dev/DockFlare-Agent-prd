@@ -107,7 +107,7 @@ Populate the following environment variables (see `env-example` for a template):
 |----------|----------|-------------|
 | `DOCKFLARE_MASTER_URL` | ✅ | Base URL of the DockFlare Master (`https://dockflare.example.com`). |
 | `DOCKFLARE_API_KEY` | ✅ | Agent API key generated in the master UI (`Agents → Generate Key`). |
-| `CLOUDFLARED_IMAGE` | ✅ | Pinned Cloudflared image (e.g. `cloudflare/cloudflared@sha256:...`). |
+| `CLOUDFLARED_IMAGE` | ✅ | Preferred Cloudflared release (`cloudflare/cloudflared:2025.9.0`) or digest (`cloudflare/cloudflared@sha256:...`). |
 | `DOCKER_HOST` | ✅ | Address of the Docker socket proxy (`tcp://docker-socket-proxy:2375`). |
 | `CLOUDFLARED_NETWORK_NAME` | ❌ | Docker network used for the managed tunnel (`cloudflare-net` by default). |
 | `LOG_LEVEL` | ❌ | Python logging level (`INFO` by default). |
@@ -132,7 +132,7 @@ version: '3.8'
 
 services:
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.2.3
+    image: tecnativa/docker-socket-proxy:v0.4.1
     container_name: docker-socket-proxy
     restart: unless-stopped
     environment:
@@ -172,7 +172,7 @@ networks:
     external: true
 ```
 
-- The proxy limits the Docker API surface the agent can reach; only the variables set to `1` are exposed.
+- The proxy limits the Docker API surface the agent can reach; only the variables set to `1` are exposed. Attach both services to the same external network so the agent can resolve `docker-socket-proxy`.
 - The agent image already runs as the unprivileged `dockflare` user (UID/GID 65532). Override with `DOCKFLARE_UID/DOCKFLARE_GID` build args if your environment requires a different mapping.
 - Provide a persistent volume for `/app/data` so cached agent identity survives restarts.
 - Ensure the external network declared in `CLOUDFLARED_NETWORK_NAME` exists (`docker network create cloudflare-net`).
@@ -205,6 +205,15 @@ Recommended practices:
 1. Store agent keys in a password manager and rotate them regularly.
 2. Use dedicated Cloudflare tunnels per agent for blast-radius isolation.
 3. Monitor heartbeat gaps on the master’s Agents page; prune offline nodes promptly.
+
+---
+
+## Continuous Delivery
+
+- GitHub Actions (`.github/workflows/docker-publish.yml`) builds and publishes multi-architecture images (`linux/amd64`, `linux/arm64`).
+- Pushing to the default branch updates the `latest` tag; annotated tags (e.g. `v1.0.0`) publish matching semantic version tags.
+- PRs build in CI without pushing, loading an `amd64` image for smoke validation.
+- Secrets required: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` with `workflow` scope PAT.
 
 ---
 

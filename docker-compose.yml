@@ -1,9 +1,9 @@
 version: '3.8'
 services:
   dockflare-agent:
-  # build:
-  # context: .
-  # image: dockflare-agent:local
+    #build:
+    #  context: .
+    #image: dockflare-agent:local
     image: alplat/dockflare-agent:stable
     container_name: dockflare-agent
     restart: unless-stopped

@@ -42,6 +42,85 @@ Deploy agents on any Docker-capable host to extend DockFlare beyond a single ser
 - **Least privilege** – per-agent API keys can be rotated or revoked without affecting the rest of the fleet.
 - **Resilient execution** – cached tunnel state lets agents ride out transient master outages.
 
+<details>
+  <summary><strong>🚀 Quick Start: Deploying the Agent</strong></summary>
+
+### Docker Compose (Recommended)
+
+To deploy the agent, create the following two files in the same directory.
+
+**1. `docker-compose.yml`**
+
+```yaml
+version: '3.8'
+
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.1
+    container_name: docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - CONTAINERS=1
+      - EVENTS=1
+      - NETWORKS=1
+      - IMAGES=1
+      - POST=1
+      - PING=1
+      - INFO=1
+      - EXEC=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  dockflare-agent:
+    image: alplat/dockflare-agent:latest
+    container_name: dockflare-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - agent_data:/app/data
+    depends_on:
+      - docker-socket-proxy
+    networks:
+      - cloudflare-net
+
+volumes:
+  agent_data:
+
+networks:
+  cloudflare-net:
+    name: cloudflare-net
+    external: true
+```
+
+**2. `.env` file**
+
+Next, create a `.env` file in the same directory. This file provides the configuration values for the agent service defined above. Refer to the **Configuration** section below for more details on each variable.
+
+```
+DOCKFLARE_MASTER_URL=https://dockflare.example.com
+DOCKFLARE_API_KEY=agent_api_key_goes_here
+DOCKER_HOST=tcp://docker-socket-proxy:2375
+# control the docker image used for the managed cloudflared tunnel (accepts repo:tag or repo@sha256:<digest>)
+CLOUDFLARED_IMAGE=cloudflare/cloudflared:2025.9.0
+LOG_LEVEL=info
+TZ=Europe/Zurich
+```
+
+Once both files are in place, run `docker-compose up -d` to start the agent.
+
+- The proxy limits the Docker API surface the agent can reach; only the variables set to `1` are exposed.
+- Granting `IMAGES=1` allows the agent to pull the managed `cloudflared` image.
+- Provide a persistent volume for `/app/data` to ensure agent identity survives restarts.
+- Ensure the external network (`cloudflare-net` by default) exists before starting.
+
+</details>
+
 ---
 
 ## Architecture Snapshot
@@ -103,7 +182,7 @@ Deploy agents on any Docker-capable host to extend DockFlare beyond a single ser
 
 ## Configuration
 
-Populate the following environment variables (see `env-example` for a template):
+The agent is configured using environment variables, typically through the `.env` file shown in the deployment guide.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -122,77 +201,6 @@ The agent persists lightweight state inside `/app/data`:
 - `tunnel_state.json` – cached tunnel token, ID, name, and desired state.
 
 Bind-mount a volume to `/app/data` in production so identity survives container restarts.
-
----
-
-## Deploying the Agent
-
-### Docker Compose (Recommended)
-
-```yaml
-version: '3.8'
-
-services:
-  docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.4.1
-    container_name: docker-socket-proxy
-    restart: unless-stopped
-    environment:
-      - DOCKER_HOST=unix:///var/run/docker.sock
-      - CONTAINERS=1
-      - EVENTS=1
-      - NETWORKS=1
-      - IMAGES=1
-      - POST=1
-      - PING=1
-      - INFO=1
-      - EXEC=1
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-
-  dockflare-agent:
-    image: alplat/dockflare-agent:latest
-    container_name: dockflare-agent
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - TZ=${TZ:-UTC}
-    volumes:
-      - agent_data:/app/data
-    depends_on:
-      - docker-socket-proxy
-    networks:
-      - cloudflare-net
-
-volumes:
-  agent_data:
-
-networks:
-  cloudflare-net:
-    name: cloudflare-net
-    external: true
-```
-
-- The proxy limits the Docker API surface the agent can reach; only the variables set to `1` are exposed. Attach both services to the same external network so the agent can resolve `docker-socket-proxy`.
-- Granting `IMAGES=1` allows the agent to pull the managed `cloudflared` image while keeping other Docker APIs disabled.
-- The agent image already runs as the unprivileged `dockflare` user (UID/GID 65532). Override with `DOCKFLARE_UID/DOCKFLARE_GID` build args if your environment requires a different mapping.
-- Provide a persistent volume for `/app/data` so cached agent identity survives restarts.
-- Ensure the external network declared in `CLOUDFLARED_NETWORK_NAME` exists (`docker network create cloudflare-net`).
-
-### Local Development
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp env-example .env  # populate with master URL + API key
-python DockFlare-Agent/main.py
-```
-
-The provided `docker-compose.yml` mirrors the production setup for quick validation on a workstation.
 
 ---
 

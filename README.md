@@ -110,6 +110,7 @@ Next, create a `.env` file in the same directory. This file provides the configu
 DOCKFLARE_MASTER_URL=https://dockflare.example.com
 DOCKFLARE_API_KEY=agent_api_key_goes_here
 DOCKER_HOST=tcp://docker-socket-proxy:2375
+AGENT_DISPLAY_NAME=Production Server
 # control the docker image used for the managed cloudflared tunnel (accepts repo:tag or repo@sha256:<digest>)
 CLOUDFLARED_IMAGE=cloudflare/cloudflared:2025.9.0
 LOG_LEVEL=info
@@ -194,6 +195,7 @@ The agent is configured using environment variables, typically through the `.env
 | `DOCKFLARE_API_KEY` | ✅ | Agent API key generated in the master UI (`Agents → Generate Key`). |
 | `CLOUDFLARED_IMAGE` | ✅ | Preferred Cloudflared release (`cloudflare/cloudflared:2025.9.0`) or digest (`cloudflare/cloudflared@sha256:...`). |
 | `DOCKER_HOST` | ✅ | Address of the Docker socket proxy (`tcp://docker-socket-proxy:2375`). |
+| `AGENT_DISPLAY_NAME` | ❌ | Human-readable name for the agent (`Production Server`, `NAS Server`). Falls back to `agent-{8chars}` if not set. |
 | `CLOUDFLARED_NETWORK_NAME` | ❌ | Docker network used for the managed tunnel (`cloudflare-net` by default). |
 | `LOG_LEVEL` | ❌ | Python logging level (`INFO` by default). |
 | `REPORT_INTERVAL_SECONDS` | ❌ | Cadence for status reports (defaults to `30`). |

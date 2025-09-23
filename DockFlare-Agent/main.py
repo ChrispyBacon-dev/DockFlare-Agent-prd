@@ -254,8 +254,10 @@ def register_with_master():
         logging.info(f"Attempting to register with master at {endpoint}")
         try:
             headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+            custom_display_name = os.getenv("AGENT_DISPLAY_NAME", "").strip()
+            default_display_name = f"agent-{AGENT_ID[:8]}" if AGENT_ID else "dockflare-agent"
             payload = {
-                "display_name": f"agent-{AGENT_ID[:8]}" if AGENT_ID else "dockflare-agent",
+                "display_name": custom_display_name or default_display_name,
                 "version": "1.0.0",
             }
             if AGENT_ID:

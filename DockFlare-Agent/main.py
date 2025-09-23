@@ -206,6 +206,7 @@ def _run_cloudflared_container(client, tunnel_name, tunnel_token):
             restart_policy={"Name": "unless-stopped"},
             environment={"TUNNEL_TOKEN": tunnel_token}
         )
+        time.sleep(2)
         current_tunnel_version = fetch_cloudflared_version(tunnel_container)
         logging.info(f"cloudflared container started: {tunnel_container.short_id}")
         report_event_to_master("tunnel_status", {
@@ -399,6 +400,23 @@ def manage_tunnels(client):
                         desired_tunnel_state = "running"
                         save_tunnel_state()
                         ensure_cloudflared_running(client)
+
+                elif action == "restart_tunnel":
+                    tunnel_token = cmd.get("tunnel_token")
+                    tunnel_name = cmd.get("tunnel_name")
+                    tunnel_id = cmd.get("tunnel_id")
+                    if tunnel_token and tunnel_name and tunnel_id:
+                        logging.info(f"Received command to restart tunnel '{tunnel_name}'.")
+                        _remove_existing_container(client)
+                        logging.info("Restarting cloudflared tunnel container...")
+                        _run_cloudflared_container(client, tunnel_name, tunnel_token)
+                        current_tunnel_token = tunnel_token
+                        current_tunnel_id = tunnel_id
+                        current_tunnel_name = tunnel_name
+                        desired_tunnel_state = "running"
+                        save_tunnel_state()
+                    else:
+                        logging.warning("Received restart_tunnel command with missing parameters.")
 
                 elif action == "stop_tunnel":
                     logging.info("Received command to stop cloudflared tunnel container.")

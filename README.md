@@ -71,7 +71,9 @@ services:
       - EXEC=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-
+    networks:
+      - dockflare-internal
+      
   dockflare-agent:
     image: alplat/dockflare-agent:latest
     container_name: dockflare-agent
@@ -80,14 +82,15 @@ services:
       - .env
     environment:
       - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
       - TZ=${TZ:-UTC}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - agent_data:/app/data
     depends_on:
       - docker-socket-proxy
     networks:
       - cloudflare-net
+      - dockflare-internal
 
 volumes:
   agent_data:
@@ -96,6 +99,8 @@ networks:
   cloudflare-net:
     name: cloudflare-net
     external: true
+  dockflare-internal:
+    name: dockflare-internal
 ```
 
 **2. `.env` file**

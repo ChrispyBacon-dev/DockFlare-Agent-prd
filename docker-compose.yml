@@ -17,7 +17,9 @@ services:
       - EXEC=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-
+    networks:
+      - dockflare-internal
+      
   dockflare-agent:
     image: alplat/dockflare-agent:latest
     container_name: dockflare-agent
@@ -34,6 +36,7 @@ services:
       - docker-socket-proxy
     networks:
       - cloudflare-net
+      - dockflare-internal
 
 volumes:
   agent_data:
@@ -42,3 +45,5 @@ networks:
   cloudflare-net:
     name: cloudflare-net
     external: true
+  dockflare-internal:
+    name: dockflare-internal

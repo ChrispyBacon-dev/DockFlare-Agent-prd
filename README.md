@@ -67,7 +67,6 @@ services:
       - IMAGES=1
       - POST=1
       - PING=1
-      - INFO=1
       - EXEC=1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

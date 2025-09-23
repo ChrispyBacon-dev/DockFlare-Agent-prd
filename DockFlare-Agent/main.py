@@ -14,6 +14,14 @@ DEFAULT_CLOUDFLARED_IMAGE = "cloudflare/cloudflared:2025.9.0"
 _SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
 
 
+def is_dockflare_enabled(labels):
+    """Check if container has DockFlare enabled using new or legacy labels."""
+    if not labels:
+        return False
+    return (labels.get("dockflare.enable") == "true" or
+            labels.get("cloudflare.tunnel.enable") == "true")
+
+
 def _normalize_cloudflared_image(raw_value, default_image):
     """Sanitize the configured cloudflared image reference."""
     if not raw_value:
@@ -311,7 +319,7 @@ def listen_for_docker_events(client):
     """
     logging.info("Performing initial scan of running containers...")
     for container in client.containers.list():
-        if container.labels.get("dockflare.enable") == "true":
+        if is_dockflare_enabled(container.labels):
             logging.info(f"Found existing container to report: {container.name}")
             report_event_to_master("container_start", {
                 "id": container.id,
@@ -328,7 +336,7 @@ def listen_for_docker_events(client):
                 try:
                     container = client.containers.get(container_id)
                     labels = container.labels
-                    if labels.get("dockflare.enable") == "true":
+                    if is_dockflare_enabled(labels):
                         event_type = f"container_{action}"
                         logging.info(f"Detected event '{action}' for container {container.name}")
                         report_event_to_master(event_type, {
@@ -455,7 +463,7 @@ def periodic_status_reporter(client):
             containers = []
             for container in client.containers.list():
                 labels = getattr(container, 'labels', {}) or {}
-                if labels.get("dockflare.enable") == "true":
+                if is_dockflare_enabled(labels):
                     containers.append({
                         "id": container.id,
                         "name": container.name,

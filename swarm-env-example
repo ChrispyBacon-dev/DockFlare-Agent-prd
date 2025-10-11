@@ -1,0 +1,29 @@
+# DockFlare Agent - Docker Swarm Environment Configuration
+# Copy this file to .env and configure your values
+
+# Required: DockFlare Master Configuration
+DOCKFLARE_MASTER_URL=https://dockflare.example.com
+# internal IP:Port of your DockFlare Master allowed
+DOCKFLARE_API_KEY=your_agent_api_key_here
+
+# Docker Swarm Configuration
+DOCKER_MODE=auto                    # auto|standalone|swarm (auto-detects if not specified)
+SWARM_NODE_ROLE=any                 # any|manager|worker (restrict agent to specific node types)
+SWARM_PLACEMENT_CONSTRAINTS=        # Additional placement constraints (comma-separated)
+
+# Agent Configuration
+AGENT_DISPLAY_NAME=Production Swarm Node  # Human-readable name for this agent
+CLOUDFLARED_IMAGE=cloudflare/cloudflared:2025.9.0  # Cloudflared version to use
+CLOUDFLARED_NETWORK_NAME=cloudflare-net            # Overlay network for tunnels
+TUNNEL_PIN_TO_NODE=true                            # Pin tunnel services to agent's node
+
+# Optional: Logging and Monitoring
+LOG_LEVEL=info                      # debug|info|warning|error
+REPORT_INTERVAL_SECONDS=30          # How often to report status to master
+TZ=Europe/Zurich                    # Timezone for container
+
+# Optional: Advanced Docker Configuration
+DOCKER_HOST=tcp://docker-socket-proxy:2375  # Docker socket (via proxy for security)
+
+# Example placement constraints:
+# SWARM_PLACEMENT_CONSTRAINTS=node.labels.environment==production,node.labels.zone==us-west-1

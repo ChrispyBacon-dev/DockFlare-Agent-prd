@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.4.1
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - CONTAINERS=1
+      - EVENTS=1
+      - NETWORKS=1
+      - IMAGES=1
+      - POST=1
+      - PING=1
+      - EXEC=1
+      - SERVICES=1
+      - TASKS=1
+      - NODES=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - dockflare-internal
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: unless-stopped
+
+  dockflare-agent:
+    image: alplat/dockflare-agent:latest
+    environment:
+      - DOCKFLARE_MASTER_URL=${DOCKFLARE_MASTER_URL}
+      - DOCKFLARE_API_KEY=${DOCKFLARE_API_KEY}
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      - DOCKER_MODE=auto
+      - AGENT_DISPLAY_NAME=${AGENT_DISPLAY_NAME:-Swarm Node}
+      - CLOUDFLARED_IMAGE=${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2025.9.0}
+      - CLOUDFLARED_NETWORK_NAME=cloudflare-net
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - REPORT_INTERVAL_SECONDS=${REPORT_INTERVAL_SECONDS:-30}
+      - TZ=${TZ:-UTC}
+      - SWARM_NODE_ROLE=any
+      - TUNNEL_PIN_TO_NODE=true
+    volumes:
+      - agent_data:/app/data
+    networks:
+      - cloudflare-net
+      - dockflare-internal
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == worker
+      restart_policy:
+        condition: unless-stopped
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+
+volumes:
+  agent_data:
+
+networks:
+  cloudflare-net:
+    driver: overlay
+    attachable: true
+    external: true
+  dockflare-internal:
+    driver: overlay
+    attachable: true

@@ -7,7 +7,9 @@ import requests
 import logging
 import tempfile
 from threading import Thread
+from datetime import datetime, timezone
 from dotenv import load_dotenv
+from flask import Flask, jsonify
 import cloudflare_api
 
 DEFAULT_CLOUDFLARED_IMAGE = "cloudflare/cloudflared:2025.9.0"
@@ -31,8 +33,7 @@ def _normalize_cloudflared_image(raw_value, default_image):
     if not candidate:
         logging.warning("CLOUDFLARED_IMAGE is blank after trimming; falling back to default %s", default_image)
         return default_image
-
-    # Split on whitespace to drop inline comments or accidental extra tokens.
+    
     candidate = candidate.split()[0]
 
     if "#" in candidate:
@@ -53,13 +54,11 @@ def _normalize_cloudflared_image(raw_value, default_image):
 
     return candidate
 
-# Basic Logging Configuration (configurable via LOG_LEVEL env var; default INFO)
 _LOG_LEVEL_STR = os.getenv('LOG_LEVEL', 'INFO').upper()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_STR, logging.INFO)
 logging.basicConfig(level=_LOG_LEVEL, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger().info(f"Logging initialized at level: {_LOG_LEVEL_STR}")
 
-# Load environment variables from .env file
 load_dotenv()
 
 MASTER_URL = os.getenv("DOCKFLARE_MASTER_URL")
@@ -72,7 +71,8 @@ else:
     logging.info(f"Using default cloudflared image: {DEFAULT_CLOUDFLARED_IMAGE}")
 AGENT_ID_FILE = "/app/data/agent_id.txt"
 TUNNEL_STATE_FILE = "/app/data/tunnel_state.json"
-AGENT_ID = None  # Will be assigned by the master
+AGENT_ID = None  
+HEALTH_CHECK_PORT = int(os.getenv("HEALTH_CHECK_PORT", "8080"))
 
 # --- Tunnel Management Globals ---
 tunnel_container = None
@@ -81,6 +81,15 @@ current_tunnel_id = None
 current_tunnel_version = None
 current_tunnel_name = None
 desired_tunnel_state = "unknown"
+
+# --- Health Check Globals ---
+last_successful_master_contact = None
+thread_health_status = {
+    "tunnel_manager": "unknown",
+    "status_reporter": "unknown",
+    "events_listener": "unknown",
+    "health_monitor": "unknown"
+}
 
 
 def fetch_cloudflared_version(container):
@@ -95,7 +104,6 @@ def fetch_cloudflared_version(container):
     except Exception as e:
         logging.error(f"Failed to fetch cloudflared version: {e}")
     return None
-
 
 def load_tunnel_state():
     global current_tunnel_token, current_tunnel_id, current_tunnel_name, desired_tunnel_state
@@ -288,11 +296,11 @@ def report_event_to_master(event_type, container_data=None):
     """
     Sends a JSON payload to the master's reporting endpoint.
     """
+    global last_successful_master_contact
     if not AGENT_ID:
         logging.debug("report_event_to_master called but AGENT_ID is missing; skipping.")
         return
     try:
-        from datetime import datetime, timezone
         payload = {
             "type": event_type,
             "timestamp": datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
@@ -309,6 +317,7 @@ def report_event_to_master(event_type, container_data=None):
         response = requests.post(endpoint, json=payload, headers=headers, timeout=15)
         try:
             response.raise_for_status()
+            last_successful_master_contact = datetime.now(timezone.utc)
             logging.info(f"Successfully reported event to master: {event_type} (status={response.status_code})")
         except requests.exceptions.HTTPError as httpe:
             logging.error(f"HTTP error reporting event to master: {httpe} status={getattr(response, 'status_code', 'unknown')} body={getattr(response, 'text', '')}")
@@ -316,48 +325,129 @@ def report_event_to_master(event_type, container_data=None):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error reporting event to master: {e}")
 
-def listen_for_docker_events(client):
-    """
-    Listens for Docker container events and reports them to the master.
-    """
-    logging.info("Performing initial scan of running containers...")
-    for container in client.containers.list():
-        if is_dockflare_enabled(container.labels):
-            logging.info(f"Found existing container to report: {container.name}")
-            report_event_to_master("container_start", {
-                "id": container.id,
-                "name": container.name,
-                "labels": container.labels
-            })
+# --- Health Check HTTP Server ---
+app = Flask(__name__)
 
-    logging.info("Listening for Docker events...")
-    for event in client.events(decode=True):
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """
+    Health check endpoint that returns agent status.
+    """
+    global last_successful_master_contact, thread_health_status
+
+    seconds_since_contact = None
+    if last_successful_master_contact:
+        seconds_since_contact = int((datetime.now(timezone.utc) - last_successful_master_contact).total_seconds())
+
+    status = "unhealthy"
+    if AGENT_ID:
+        if seconds_since_contact is not None and seconds_since_contact < 120:
+            status = "healthy"
+        elif seconds_since_contact is not None and seconds_since_contact < 300:
+            status = "degraded"
+
+    tunnel_container_running = False
+    if tunnel_container:
         try:
-            if event.get("Type") == "container" and event.get("Action") in ["start", "stop", "die"]:
-                action = event['Action']
-                container_id = event['id']
-                try:
-                    container = client.containers.get(container_id)
-                    labels = container.labels
-                    if is_dockflare_enabled(labels):
+            tunnel_container.reload()
+            tunnel_container_running = tunnel_container.status == 'running'
+        except:
+            pass
+
+    response = {
+        "status": status,
+        "agent_id": AGENT_ID,
+        "registered": AGENT_ID is not None,
+        "tunnel": {
+            "state": desired_tunnel_state,
+            "name": current_tunnel_name,
+            "id": current_tunnel_id,
+            "container_running": tunnel_container_running,
+            "version": current_tunnel_version
+        },
+        "master_connection": {
+            "url": MASTER_URL,
+            "last_successful_report": last_successful_master_contact.isoformat() if last_successful_master_contact else None,
+            "seconds_since_contact": seconds_since_contact
+        },
+        "threads": thread_health_status.copy()
+    }
+
+    http_status = 200 if status == "healthy" else 503
+    return jsonify(response), http_status
+
+def run_health_check_server():
+    """
+    Runs the Flask health check server.
+    """
+    thread_health_status["health_server"] = "running"
+    try:
+        app.run(host='0.0.0.0', port=HEALTH_CHECK_PORT, debug=False, use_reloader=False)
+    except Exception as e:
+        logging.error(f"Health check server error: {e}")
+        thread_health_status["health_server"] = "failed"
+
+def listen_for_docker_events(client, label_prefix):
+    thread_health_status[f"events_listener_{label_prefix.strip('.')}"] = "running"
+    logging.info(f"Performing initial scan of running containers for prefix {label_prefix}...")
+    try:
+        for container in client.containers.list():
+            if container.labels.get(f"{label_prefix}enable") == "true":
+                logging.info(f"Found existing container to report for {label_prefix}: {container.name}")
+                report_event_to_master("container_start", {
+                    "id": container.id,
+                    "name": container.name,
+                    "labels": container.labels
+                })
+    except Exception as e:
+        logging.error(f"Error during initial container scan for {label_prefix}: {e}")
+
+    logging.info(f"Listening for Docker events with prefix {label_prefix}...")
+    event_filters = {
+        "type": "container",
+        "label": f"{label_prefix}enable=true"
+    }
+    try:
+        for event in client.events(decode=True, filters=event_filters):
+            try:
+                if event.get("Type") == "container" and event.get("Action") in ["start", "stop", "die"]:
+                    action = event['Action']
+                    container_id = event['id']
+                    try:
+                        container = client.containers.get(container_id)
                         event_type = f"container_{action}"
-                        logging.info(f"Detected event '{action}' for container {container.name}")
+                        logging.info(f"Detected event '{action}' for container {container.name} ({label_prefix})")
                         report_event_to_master(event_type, {
                             "id": container_id,
                             "name": container.name,
-                            "labels": labels
+                            "labels": container.labels
                         })
-                except docker.errors.NotFound:
-                    logging.warning(f"Container {container_id[:12]} not found after event '{action}'. Reporting to master.")
-                    report_event_to_master({"action": action, "container_id": container_id})
-        except Exception as e:
-            logging.error(f"An error occurred in the event loop: {e}")
+                    except docker.errors.NotFound:
+                        logging.warning(f"Container {container_id[:12]} not found after event '{action}' ({label_prefix}). Reporting to master.")
+                        report_event_to_master({"action": action, "container_id": container_id})
+            except Exception as e:
+                logging.error(f"An error occurred in the event loop for {label_prefix}: {e}")
+    except Exception as e:
+        logging.error(f"Failed to connect to Docker event stream for {label_prefix}: {e}")
+        thread_health_status[f"events_listener_{label_prefix.strip('.')}"] = "failed"
+
+def start_event_listeners(client):
+    threads = []
+    label_prefixes = ["dockflare.", "cloudflare.tunnel."]
+    for prefix in label_prefixes:
+        thread = Thread(target=listen_for_docker_events, args=(client, prefix), daemon=True)
+        threads.append(thread)
+    return threads
 
 def manage_tunnels(client):
     """
     Periodically polls for commands from the master and manages a cloudflared container.
     """
     global tunnel_container, current_tunnel_token, current_tunnel_id, current_tunnel_version, current_tunnel_name, desired_tunnel_state
+    thread_health_status["tunnel_manager"] = "running"
     logging.info("Tunnel management thread started.")
 
     while True:
@@ -456,6 +546,7 @@ def manage_tunnels(client):
 
 
 def tunnel_health_monitor(client):
+    thread_health_status["health_monitor"] = "running"
     logging.info("Tunnel health monitor thread started.")
     while True:
         try:
@@ -470,6 +561,7 @@ def periodic_status_reporter(client):
     """
     Periodic reporter: sends heartbeat and full status_report of enabled containers.
     """
+    thread_health_status["status_reporter"] = "running"
     logging.info("Status reporter thread started.")
     while True:
         if not AGENT_ID:
@@ -518,6 +610,11 @@ def cleanup():
 if __name__ == "__main__":
     load_agent_id()
     load_tunnel_state()
+
+    logging.info(f"Starting health check server on port {HEALTH_CHECK_PORT}")
+    health_thread = Thread(target=run_health_check_server, daemon=True)
+    health_thread.start()
+
     if register_with_master():
         docker_client = docker.from_env()
         try:
@@ -526,8 +623,9 @@ if __name__ == "__main__":
             tunnel_thread.start()
             status_thread = Thread(target=periodic_status_reporter, args=(docker_client,), daemon=True)
             status_thread.start()
-            events_thread = Thread(target=listen_for_docker_events, args=(docker_client,), daemon=True)
-            events_thread.start()
+            event_threads = start_event_listeners(docker_client)
+            for t in event_threads:
+                t.start()
             monitor_thread = Thread(target=tunnel_health_monitor, args=(docker_client,), daemon=True)
             monitor_thread.start()
             while True:

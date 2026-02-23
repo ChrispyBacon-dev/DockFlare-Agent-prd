@@ -85,6 +85,8 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - agent_data:/app/data
+    ports:
+      - "127.0.0.1:${HEALTH_CHECK_PORT:-8080}:${HEALTH_CHECK_PORT:-8080}"
     depends_on:
       - docker-socket-proxy
     networks:
@@ -160,12 +162,17 @@ Once both files are in place, run `docker-compose up -d` to start the agent.
 
 1. **Bootstrapping** – environment variables are loaded, logging is configured, and cached agent identity/tunnel data are restored from `/app/data`.
 2. **Registration** – the agent authenticates with the master using `DOCKFLARE_API_KEY`, receives (or refreshes) its Agent ID, and persists it locally.
-3. **Thread fan-out** – shared Docker client powers four background workers:
+3. **HTTP health server** – Flask server exposes `/health` on `HEALTH_CHECK_PORT` (default 8080) with status, tunnel state, and thread health.
+4. **Thread fan-out** – shared Docker client powers background workers:
    - `manage_tunnels` polls for commands (`start_tunnel`, `stop_tunnel`, `update_tunnel_config`).
    - `periodic_status_reporter` emits heartbeats and summaries of labelled containers every `REPORT_INTERVAL_SECONDS`.
-   - `listen_for_docker_events` streams container lifecycle events for `dockflare.enable=true` workloads.
+   - `listen_for_docker_events` streams container lifecycle events for `dockflare.enable` and `cloudflare.tunnel.enable` labels.
    - `tunnel_health_monitor` verifies the managed `cloudflared` container remains healthy.
-4. **Shutdown** – `cleanup()` stops and removes the managed tunnel container before the agent exits.
+5. **Shutdown** – `cleanup()` stops and removes the managed tunnel container before the agent exits.
+
+#### Health Check Endpoint
+
+`GET /health` returns JSON with `status` (healthy/degraded/unhealthy), `agent_id`, `tunnel` state, `master_connection` (last successful report, seconds since contact), and `threads` status. Healthy when last master contact < 120s; degraded when < 300s.
 
 ### Cloudflare Helper Module
 
@@ -201,6 +208,7 @@ The agent is configured using environment variables, typically through the `.env
 | `LOG_LEVEL` | ❌ | Python logging level (`INFO` by default). |
 | `REPORT_INTERVAL_SECONDS` | ❌ | Cadence for status reports (defaults to `30`). |
 | `TZ` | ❌ | Host timezone exposed to the container (`UTC` by default). |
+| `HEALTH_CHECK_PORT` | ❌ | HTTP health check server port (defaults to `8080`). |
 | `CF_ACCESS_CLIENT_ID` | ❌ | Cloudflare Access Service Token Client ID (when Master is behind Access). |
 | `CF_ACCESS_CLIENT_SECRET` | ❌ | Cloudflare Access Service Token Client Secret (when Master is behind Access). |
 

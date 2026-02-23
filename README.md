@@ -144,7 +144,8 @@ Once both files are in place, run `docker-compose up -d` to start the agent.
 ├── DockFlare-Agent/
 │   ├── __init__.py
 │   ├── cloudflare_api.py
-│   └── main.py
+│   ├── main.py
+│   └── transport.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── env-example
@@ -170,9 +171,9 @@ Once both files are in place, run `docker-compose up -d` to start the agent.
 
 `DockFlare-Agent/cloudflare_api.py` provides the thin wrapper that the agent uses to proxy Cloudflare API calls through the master:
 
-- `get_account_id(master_url, api_key)` – resolves the Cloudflare account the master exposes to agents.
+- `get_account_id(master_url, headers)` – resolves the Cloudflare account the master exposes to agents.
 - `generate_ingress_rules(rules)` – converts desired ingress records into a tunnel configuration payload.
-- `update_tunnel_config(master_url, api_key, tunnel_id, ingress_rules)` – pushes ingress updates via the master’s API.
+- `update_tunnel_config(master_url, headers, tunnel_id, ingress_rules)` – pushes ingress updates via the master’s API.
 
 ---
 
@@ -200,6 +201,12 @@ The agent is configured using environment variables, typically through the `.env
 | `LOG_LEVEL` | ❌ | Python logging level (`INFO` by default). |
 | `REPORT_INTERVAL_SECONDS` | ❌ | Cadence for status reports (defaults to `30`). |
 | `TZ` | ❌ | Host timezone exposed to the container (`UTC` by default). |
+| `CF_ACCESS_CLIENT_ID` | ❌ | Cloudflare Access Service Token Client ID (when Master is behind Access). |
+| `CF_ACCESS_CLIENT_SECRET` | ❌ | Cloudflare Access Service Token Client Secret (when Master is behind Access). |
+
+#### Cloudflare Access (Optional)
+
+When the DockFlare Master is protected by Cloudflare Access policies, set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` to a [Cloudflare Service Token](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/). Create the token in Cloudflare One > Access > Service credentials > Service Tokens, add it to your Access application policy with **Service Auth** action, and pass both values to the agent. This avoids IP bypass policies and enables deployment on any host.
 
 The agent persists lightweight state inside `/app/data`:
 

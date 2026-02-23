@@ -1,17 +1,19 @@
 import requests
 import logging
 
-def update_tunnel_config(master_url, api_key, tunnel_id, ingress_rules):
+def update_tunnel_config(master_url, headers, tunnel_id, ingress_rules):
     """
     Updates the Cloudflare tunnel configuration for the agent.
     """
-    if not all([master_url, api_key, tunnel_id]):
-        logging.error("Missing master_url, api_key, or tunnel_id for tunnel config update.")
+    if not all([master_url, headers, tunnel_id]):
+        logging.error("Missing master_url, headers, or tunnel_id for tunnel config update.")
         return False
 
-    endpoint = f"/accounts/{get_account_id(master_url, api_key)}/cfd_tunnel/{tunnel_id}/configurations"
+    account_id = get_account_id(master_url, headers)
+    if not account_id:
+        return False
+    endpoint = f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations"
     url = f"{master_url.rstrip('/')}{endpoint}"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {"config": {"ingress": ingress_rules}}
 
     try:
@@ -37,13 +39,12 @@ def generate_ingress_rules(rules):
     ingress.append({"service": "http_status:404"})
     return ingress
 
-def get_account_id(master_url, api_key):
+def get_account_id(master_url, headers):
     """
     Retrieves the Cloudflare account ID from the master.
     """
     endpoint = "/accounts"
     url = f"{master_url.rstrip('/')}{endpoint}"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     try:
         response = requests.get(url, headers=headers, timeout=15)

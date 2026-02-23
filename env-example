@@ -6,3 +6,9 @@ AGENT_DISPLAY_NAME=Production Server
 CLOUDFLARED_IMAGE=cloudflare/cloudflared:2025.9.0
 LOG_LEVEL=info
 TZ=Europe/Zurich
+
+# Optional: Cloudflare Access Service Token (when Master is behind Access)
+# Create a service token in Cloudflare One > Access > Service credentials > Service Tokens.
+# Add the token to your Access application policy with Service Auth action.
+# CF_ACCESS_CLIENT_ID=
+# CF_ACCESS_CLIENT_SECRET=

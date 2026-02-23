@@ -9,6 +9,7 @@ import tempfile
 from threading import Thread
 from dotenv import load_dotenv
 import cloudflare_api
+import transport
 
 DEFAULT_CLOUDFLARED_IMAGE = "cloudflare/cloudflared:2025.9.0"
 _SHA256_HEX_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
@@ -253,7 +254,7 @@ def register_with_master():
     while True:
         logging.info(f"Attempting to register with master at {endpoint}")
         try:
-            headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+            headers = transport.get_master_headers()
             custom_display_name = os.getenv("AGENT_DISPLAY_NAME", "").strip()
             default_display_name = f"agent-{AGENT_ID[:8]}" if AGENT_ID else "dockflare-agent"
             payload = {
@@ -300,7 +301,7 @@ def report_event_to_master(event_type, container_data=None):
         if container_data:
             payload["container"] = container_data
 
-        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+        headers = transport.get_master_headers()
         endpoint = f"{MASTER_URL}/api/v2/agents/{AGENT_ID}/events"
 
         # Log endpoint and payload at debug level so container logs show activity without being too noisy at info.
@@ -365,7 +366,7 @@ def manage_tunnels(client):
             time.sleep(10)
             continue
         try:
-            headers = {"Authorization": f"Bearer {API_KEY}"}
+            headers = transport.get_master_headers(include_json=False)
             endpoint = f"{MASTER_URL}/api/v2/agents/{AGENT_ID}/commands"
             response = requests.get(endpoint, headers=headers, timeout=15)
             response.raise_for_status()
@@ -440,7 +441,9 @@ def manage_tunnels(client):
                         continue
                     rules = cmd.get("rules", {})
                     ingress_rules = cloudflare_api.generate_ingress_rules(rules)
-                    success = cloudflare_api.update_tunnel_config(MASTER_URL, API_KEY, current_tunnel_id, ingress_rules)
+                    success = cloudflare_api.update_tunnel_config(
+                        MASTER_URL, transport.get_master_headers(), current_tunnel_id, ingress_rules
+                    )
                     if success:
                         logging.info("Tunnel configuration updated successfully")
                     else:

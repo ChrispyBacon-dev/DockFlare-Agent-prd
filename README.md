@@ -111,7 +111,7 @@ networks:
 
 Next, create a `.env` file in the same directory. This file provides the configuration values for the agent service defined above. Refer to the **Configuration** section below for more details on each variable.
 
-```
+```ini
 DOCKFLARE_MASTER_URL=https://dockflare.example.com
 DOCKFLARE_API_KEY=agent_api_key_goes_here
 DOCKER_HOST=tcp://docker-socket-proxy:2375
@@ -276,6 +276,8 @@ Recommended practices:
 | Commands never clear | Confirm Redis connectivity and that host clocks are in sync. |
 | DNS or Access policies not updating | Check agent logs (`docker logs dockflare-agent`) and confirm cloudflared is running. |
 | Heartbeat offline | Inspect network path and TLS configuration between agent and master. |
+
+For deployment gotchas (permissions, cloudflare-net, DNS zone scoping), see [Deployment Troubleshooting](docs/DEPLOYMENT-TROUBLESHOOTING.md).
 
 The `overview.json` sample captures the telemetry an active agent reports back to the master and can be used as a reference when debugging payloads.
 

@@ -1,4 +1,4 @@
-version: '3.8'
+#version: '3.8'
 
 services:
   docker-socket-proxy:
@@ -17,32 +17,68 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - dockflare-internal
-      
+      # - dockflare-internal
+      - docker-socket-proxy-net
+
+  cloudflared-net-init:
+    image: docker:cli
+    environment:
+      - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+    command:
+      - sh
+      - -c
+      - |
+        echo "Checking if Network cloudflare-net exists..."
+        if [ -z "$(docker network ls -f name=cloudflare-net -q)" ]; then
+          echo "Network cloudflare-net does not exist, creating..."
+          docker network create cloudflare-net
+          echo "Network cloudflare-net created."
+        else
+          echo "Network cloudflare-net exists, skipping creation."
+        fi
+        echo "Network cloudflare-net check complete"
+    restart: "no"
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+    networks:
+      - docker-socket-proxy-net
+
   dockflare-agent:
-    image: alplat/dockflare-agent:latest
+    # image: alplat/dockflare-agent:latest
+    image: dockflare-agent:local
     container_name: dockflare-agent
     restart: unless-stopped
     env_file:
       - .env
     environment:
       - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
+      - DOCKFLARE_API_KEY=${DOCKFLARE_API_KEY}
       - TZ=${TZ:-UTC}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - CF_ACCESS_CLIENT_ID=${CF_ACCESS_CLIENT_ID}
       - CF_ACCESS_CLIENT_SECRET=${CF_ACCESS_CLIENT_SECRET}
     volumes:
-      # docker volume
-      # - agent_data:/app/data
-      # docker bind mount
       - ${DOCKFLARE_DATA_PATH}:/app/data
     depends_on:
-      - docker-socket-proxy
+      docker-socket-proxy:
+        condition: service_started
+      cloudflared-net-init:
+        condition: service_completed_successfully
     networks:
       - cloudflare-net
       - dockflare-internal
+      - docker-socket-proxy-net
 
-# Only if using docker volume
+  dockflare-agent-init:
+    image: alpine:3.20
+    command: ["sh", "-c", "echo 'checking permissions...' && chown -R ${DOCKFLARE_UID:-65532}:${DOCKFLARE_GID:-65532} /app/data"]
+    volumes:
+      - ${DOCKFLARE_DATA_PATH}:/app/data
+    networks:
+      - dockflare-internal
+    restart: "no"
+
 # volumes:
 #   agent_data:
 
@@ -52,3 +88,5 @@ networks:
     external: true
   dockflare-internal:
     name: dockflare-internal
+  docker-socket-proxy-net:
+    name: docker-socket-proxy-net

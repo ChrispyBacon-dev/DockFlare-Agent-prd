@@ -1,16 +1,29 @@
-DOCKFLARE_MASTER_URL=https://dockflare.example.com
-DOCKFLARE_API_KEY=agent_api_key_goes_here
+####################################
+# 🛠️ DOCKER HOME PATH 🛠️ #
+####################################
+
+DOCKER_HOME=/srv/docker
+DOCKFLARE_DATA_PATH=${DOCKER_HOME}/volumes/dockflare-agentdata/
+DOCKFLARE_UID=65532
+DOCKFLARE_GID=65532
+
+####################################
+# 🛠️ CLOUDFLARE VARIABLES 🛠️ #
+####################################
+
+# Cloudflare Access Service Token (required when Master is behind Access)
+CF_ACCESS_CLIENT_ID=<your-access-client-id>.access
+CF_ACCESS_CLIENT_SECRET=<your-access-client-secret>
+
+####################################
+# 🛠️ DOCKFLARE VARIABLES 🛠️ #
+####################################
+
+DOCKFLARE_MASTER_URL=https://dockflare.mydomain.com
+DOCKFLARE_API_KEY=<dockflare-api-key>
 DOCKER_HOST=tcp://docker-socket-proxy:2375
-AGENT_DISPLAY_NAME=Production Server
+AGENT_DISPLAY_NAME=<agent-display-name>
 # control the docker image used for the managed cloudflared tunnel (accepts repo:tag or repo@sha256:<digest>)
 CLOUDFLARED_IMAGE=cloudflare/cloudflared:2025.9.0
 LOG_LEVEL=info
-TZ=Europe/Zurich
-# HTTP health check server port (default 8080)
-HEALTH_CHECK_PORT=8080
-
-# Optional: Cloudflare Access Service Token (when Master is behind Access)
-# Create a service token in Cloudflare One > Access > Service credentials > Service Tokens.
-# Add the token to your Access application policy with Service Auth action.
-# CF_ACCESS_CLIENT_ID=
-# CF_ACCESS_CLIENT_SECRET=
+TZ=Europe/Paris

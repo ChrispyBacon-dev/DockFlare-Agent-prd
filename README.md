@@ -41,6 +41,7 @@ Deploy agents on any Docker-capable host to extend DockFlare beyond a single ser
 - **Real-time visibility** – agents stream lifecycle events, periodic status reports, and tunnel metrics back to the master.
 - **Least privilege** – per-agent API keys can be rotated or revoked without affecting the rest of the fleet.
 - **Resilient execution** – cached tunnel state lets agents ride out transient master outages.
+- **Cloudflare Access** – when the Master is behind Application Access, use a Service Token instead of IP bypass; deploy agents on any host.
 
 <details>
   <summary><strong>🚀 Quick Start: Deploying the Agent</strong></summary>
@@ -83,6 +84,8 @@ services:
       - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
       - TZ=${TZ:-UTC}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CF_ACCESS_CLIENT_ID=${CF_ACCESS_CLIENT_ID}
+      - CF_ACCESS_CLIENT_SECRET=${CF_ACCESS_CLIENT_SECRET}
     volumes:
       - agent_data:/app/data
     ports:
@@ -113,10 +116,14 @@ DOCKFLARE_MASTER_URL=https://dockflare.example.com
 DOCKFLARE_API_KEY=agent_api_key_goes_here
 DOCKER_HOST=tcp://docker-socket-proxy:2375
 AGENT_DISPLAY_NAME=Production Server
-# control the docker image used for the managed cloudflared tunnel (accepts repo:tag or repo@sha256:<digest>)
 CLOUDFLARED_IMAGE=cloudflare/cloudflared:2025.9.0
 LOG_LEVEL=info
 TZ=Europe/Zurich
+HEALTH_CHECK_PORT=8080
+
+# Optional: when Master is behind Cloudflare Application Access (see Cloudflare Access section)
+# CF_ACCESS_CLIENT_ID=
+# CF_ACCESS_CLIENT_SECRET=
 ```
 
 Once both files are in place, run `docker-compose up -d` to start the agent.
@@ -209,12 +216,30 @@ The agent is configured using environment variables, typically through the `.env
 | `REPORT_INTERVAL_SECONDS` | ❌ | Cadence for status reports (defaults to `30`). |
 | `TZ` | ❌ | Host timezone exposed to the container (`UTC` by default). |
 | `HEALTH_CHECK_PORT` | ❌ | HTTP health check server port (defaults to `8080`). |
-| `CF_ACCESS_CLIENT_ID` | ❌ | Cloudflare Access Service Token Client ID (when Master is behind Access). |
-| `CF_ACCESS_CLIENT_SECRET` | ❌ | Cloudflare Access Service Token Client Secret (when Master is behind Access). |
+| `CF_ACCESS_CLIENT_ID` | ❌ | Cloudflare Access Service Token Client ID (when Master is behind Application Access). |
+| `CF_ACCESS_CLIENT_SECRET` | ❌ | Cloudflare Access Service Token Client Secret (when Master is behind Application Access). |
 
-#### Cloudflare Access (Optional)
+#### Cloudflare Access Service Token (Optional)
 
-When the DockFlare Master is protected by Cloudflare Access policies, set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` to a [Cloudflare Service Token](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/). Create the token in Cloudflare One > Access > Service credentials > Service Tokens, add it to your Access application policy with **Service Auth** action, and pass both values to the agent. This avoids IP bypass policies and enables deployment on any host.
+Use a Cloudflare Access Service Token **only when** the DockFlare Master is protected by Cloudflare Application Access. The agent must send `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers so Cloudflare allows requests through before they reach the Master.
+
+**Requirements:**
+- The Master domain is behind a Cloudflare Access Application.
+- A Service Token is created and added to an Access Policy.
+- That Policy is applied to the Access Application protecting the Master.
+
+**Create a Service Token:**
+
+1. In [Cloudflare One](https://one.dash.cloudflare.com), go to **Access** > **Service credentials** > **Service Tokens**.
+2. Select **Create Service Token**.
+3. Name the token (e.g. `DockFlare Agent`).
+4. Choose a **Service Token Duration** (e.g. 1 year).
+5. Select **Generate token**.
+6. Copy the **Client ID** and **Client Secret** immediately (the secret is shown only once).
+7. Add the token to your Access Application: edit the Application protecting the Master, add a Policy with **Service Auth** action, and include this Service Token.
+8. Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in the agent `.env` and ensure they are passed to the container (e.g. via `env_file` and `environment` in docker-compose).
+
+See [Cloudflare Service Tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/) for full documentation. This avoids IP bypass policies and enables deployment on any host.
 
 The agent persists lightweight state inside `/app/data`:
 
@@ -247,6 +272,7 @@ Recommended practices:
 | Symptom | Resolution |
 |---------|------------|
 | Agent stuck in `pending` | Verify the API key, ensure the agent can reach the master, and enrol it from the UI. |
+| 401/403 when Master is behind Access | Set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`; ensure the Service Token is in a Policy with **Service Auth** applied to the Master's Access Application. |
 | Commands never clear | Confirm Redis connectivity and that host clocks are in sync. |
 | DNS or Access policies not updating | Check agent logs (`docker logs dockflare-agent`) and confirm cloudflared is running. |
 | Heartbeat offline | Inspect network path and TLS configuration between agent and master. |

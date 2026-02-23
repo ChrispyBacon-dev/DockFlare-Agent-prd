@@ -85,7 +85,6 @@ services:
 networks:
   cloudflare-net:
     name: cloudflare-net
-    external: true
   dockflare-internal:
     name: dockflare-internal
   docker-socket-proxy-net:

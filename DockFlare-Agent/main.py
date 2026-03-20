@@ -6,7 +6,10 @@ import docker
 import requests
 import logging
 import tempfile
+import http.server
+import socketserver
 from threading import Thread
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 import cloudflare_api
 
@@ -64,6 +67,18 @@ load_dotenv()
 
 MASTER_URL = os.getenv("DOCKFLARE_MASTER_URL")
 API_KEY = os.getenv("DOCKFLARE_API_KEY")
+CF_ACCESS_CLIENT_ID = os.getenv("CF_ACCESS_CLIENT_ID", "")
+CF_ACCESS_CLIENT_SECRET = os.getenv("CF_ACCESS_CLIENT_SECRET", "")
+
+
+def get_headers(content_type=True):
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    if content_type:
+        headers["Content-Type"] = "application/json"
+    if CF_ACCESS_CLIENT_ID:
+        headers["CF-Access-Client-Id"] = CF_ACCESS_CLIENT_ID
+        headers["CF-Access-Client-Secret"] = CF_ACCESS_CLIENT_SECRET
+    return headers
 CLOUDFLARED_NETWORK_NAME = os.getenv("CLOUDFLARED_NETWORK_NAME", "cloudflare-net")
 CLOUDFLARED_IMAGE = _normalize_cloudflared_image(os.getenv("CLOUDFLARED_IMAGE"), DEFAULT_CLOUDFLARED_IMAGE)
 if CLOUDFLARED_IMAGE != DEFAULT_CLOUDFLARED_IMAGE:
@@ -253,7 +268,7 @@ def register_with_master():
     while True:
         logging.info(f"Attempting to register with master at {endpoint}")
         try:
-            headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+            headers = get_headers()
             custom_display_name = os.getenv("AGENT_DISPLAY_NAME", "").strip()
             default_display_name = f"agent-{AGENT_ID[:8]}" if AGENT_ID else "dockflare-agent"
             payload = {
@@ -300,7 +315,7 @@ def report_event_to_master(event_type, container_data=None):
         if container_data:
             payload["container"] = container_data
 
-        headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+        headers = get_headers()
         endpoint = f"{MASTER_URL}/api/v2/agents/{AGENT_ID}/events"
 
         # Log endpoint and payload at debug level so container logs show activity without being too noisy at info.
@@ -316,42 +331,57 @@ def report_event_to_master(event_type, container_data=None):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error reporting event to master: {e}")
 
-def listen_for_docker_events(client):
-    """
-    Listens for Docker container events and reports them to the master.
-    """
-    logging.info("Performing initial scan of running containers...")
-    for container in client.containers.list():
-        if is_dockflare_enabled(container.labels):
-            logging.info(f"Found existing container to report: {container.name}")
-            report_event_to_master("container_start", {
-                "id": container.id,
-                "name": container.name,
-                "labels": container.labels
-            })
+def listen_for_docker_events(client, label_prefix):
+    thread_health_status[f"events_listener_{label_prefix.strip('.')}"] = "running"
+    logging.info(f"Performing initial scan of running containers for prefix {label_prefix}...")
+    try:
+        for container in client.containers.list():
+            if container.labels.get(f"{label_prefix}enable") == "true":
+                logging.info(f"Found existing container to report for {label_prefix}: {container.name}")
+                report_event_to_master("container_start", {
+                    "id": container.id,
+                    "name": container.name,
+                    "labels": container.labels
+                })
+    except Exception as e:
+        logging.error(f"Error during initial container scan for {label_prefix}: {e}")
 
-    logging.info("Listening for Docker events...")
-    for event in client.events(decode=True):
-        try:
-            if event.get("Type") == "container" and event.get("Action") in ["start", "stop", "die"]:
-                action = event['Action']
-                container_id = event['id']
-                try:
-                    container = client.containers.get(container_id)
-                    labels = container.labels
-                    if is_dockflare_enabled(labels):
+    logging.info(f"Listening for Docker events with prefix {label_prefix}...")
+    event_filters = {
+        "type": "container",
+        "label": f"{label_prefix}enable=true"
+    }
+    try:
+        for event in client.events(decode=True, filters=event_filters):
+            try:
+                if event.get("Type") == "container" and event.get("Action") in ["start", "stop", "die"]:
+                    action = event['Action']
+                    container_id = event['id']
+                    try:
+                        container = client.containers.get(container_id)
                         event_type = f"container_{action}"
-                        logging.info(f"Detected event '{action}' for container {container.name}")
+                        logging.info(f"Detected event '{action}' for container {container.name} ({label_prefix})")
                         report_event_to_master(event_type, {
                             "id": container_id,
                             "name": container.name,
-                            "labels": labels
+                            "labels": container.labels
                         })
-                except docker.errors.NotFound:
-                    logging.warning(f"Container {container_id[:12]} not found after event '{action}'. Reporting to master.")
-                    report_event_to_master({"action": action, "container_id": container_id})
-        except Exception as e:
-            logging.error(f"An error occurred in the event loop: {e}")
+                    except docker.errors.NotFound:
+                        logging.warning(f"Container {container_id[:12]} not found after event '{action}' ({label_prefix}). Reporting to master.")
+                        report_event_to_master({"action": action, "container_id": container_id})
+            except Exception as e:
+                logging.error(f"An error occurred in the event loop for {label_prefix}: {e}")
+    except Exception as e:
+        logging.error(f"Failed to connect to Docker event stream for {label_prefix}: {e}")
+        thread_health_status[f"events_listener_{label_prefix.strip('.')}"] = "failed"
+
+def start_event_listeners(client):
+    threads = []
+    label_prefixes = ["dockflare.", "cloudflare.tunnel."]
+    for prefix in label_prefixes:
+        thread = Thread(target=listen_for_docker_events, args=(client, prefix), daemon=True)
+        threads.append(thread)
+    return threads
 
 def manage_tunnels(client):
     """
@@ -365,7 +395,7 @@ def manage_tunnels(client):
             time.sleep(10)
             continue
         try:
-            headers = {"Authorization": f"Bearer {API_KEY}"}
+            headers = get_headers(content_type=False)
             endpoint = f"{MASTER_URL}/api/v2/agents/{AGENT_ID}/commands"
             response = requests.get(endpoint, headers=headers, timeout=15)
             response.raise_for_status()
@@ -515,6 +545,70 @@ def cleanup():
         finally:
             tunnel_container = None
     current_tunnel_version = None
+# --- Health Check HTTP Server ---
+class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        global last_successful_master_contact, thread_health_status
+
+        if self.path == '/health':
+            seconds_since_contact = None
+            if last_successful_master_contact:
+                seconds_since_contact = int((datetime.now(timezone.utc) - last_successful_master_contact).total_seconds())
+
+            status = "unhealthy"
+            if AGENT_ID:
+                if seconds_since_contact is not None and seconds_since_contact < 120:
+                    status = "healthy"
+                elif seconds_since_contact is not None and seconds_since_contact < 300:
+                    status = "degraded"
+
+            tunnel_container_running = False
+            if tunnel_container:
+                try:
+                    tunnel_container.reload()
+                    tunnel_container_running = tunnel_container.status == 'running'
+                except:
+                    pass
+
+            response_data = {
+                "status": status,
+                "agent_id": AGENT_ID,
+                "registered": AGENT_ID is not None,
+                "tunnel": {
+                    "state": desired_tunnel_state,
+                    "name": current_tunnel_name,
+                    "id": current_tunnel_id,
+                    "container_running": tunnel_container_running,
+                    "version": current_tunnel_version
+                },
+                "master_connection": {
+                    "url": MASTER_URL,
+                    "last_successful_report": last_successful_master_contact.isoformat() if last_successful_master_contact else None,
+                    "seconds_since_contact": seconds_since_contact
+                },
+                "threads": thread_health_status.copy()
+            }
+
+            http_status = 200 if status == "healthy" else 503
+            self.send_response(http_status)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b'404 Not Found')
+
+def run_health_check_server():
+    thread_health_status["health_server"] = "running"
+    try:
+        with socketserver.TCPServer(('', HEALTH_CHECK_PORT), HealthCheckHandler) as httpd:
+            logging.info(f"Health check server running on port {HEALTH_CHECK_PORT}")
+            httpd.serve_forever()
+    except Exception as e:
+        logging.error(f"Health check server error: {e}")
+        thread_health_status["health_server"] = "failed"
+
 if __name__ == "__main__":
     load_agent_id()
     load_tunnel_state()
@@ -526,8 +620,9 @@ if __name__ == "__main__":
             tunnel_thread.start()
             status_thread = Thread(target=periodic_status_reporter, args=(docker_client,), daemon=True)
             status_thread.start()
-            events_thread = Thread(target=listen_for_docker_events, args=(docker_client,), daemon=True)
-            events_thread.start()
+            event_threads = start_event_listeners(docker_client)
+            for t in event_threads:
+                t.start()
             monitor_thread = Thread(target=tunnel_health_monitor, args=(docker_client,), daemon=True)
             monitor_thread.start()
             while True:

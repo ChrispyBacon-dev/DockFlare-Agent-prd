@@ -20,7 +20,8 @@ services:
       - dockflare-internal
       
   dockflare-agent:
-    image: alplat/dockflare-agent:latest
+    #image: alplat/dockflare-agent:latest
+    build: .
     container_name: dockflare-agent
     restart: unless-stopped
     env_file:
@@ -29,6 +30,8 @@ services:
       - DOCKER_HOST=${DOCKER_HOST:-tcp://docker-socket-proxy:2375}
       - TZ=${TZ:-UTC}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CF_ACCESS_CLIENT_ID=${CF_ACCESS_CLIENT_ID:-}
+      - CF_ACCESS_CLIENT_SECRET=${CF_ACCESS_CLIENT_SECRET:-}
     volumes:
       - agent_data:/app/data
     depends_on:

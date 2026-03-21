@@ -97,6 +97,10 @@ current_tunnel_version = None
 current_tunnel_name = None
 desired_tunnel_state = "unknown"
 
+# --- Health / Monitoring Globals ---
+thread_health_status = {}
+last_successful_master_contact = None
+
 
 def fetch_cloudflared_version(container):
     try:
